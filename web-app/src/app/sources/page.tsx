@@ -40,6 +40,7 @@ function SourcesContent() {
     success: boolean;
     error?: string;
     articles?: Array<{ title: string; url: string }>;
+    count?: number;
     previewOnly?: boolean;
     message?: string;
   } | null>(null);
