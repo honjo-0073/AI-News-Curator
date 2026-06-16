@@ -255,7 +255,7 @@ function SourcesContent() {
                 {testResult.success ? (
                   <>
                     <CheckCircle color="var(--color-success)" size={18} />
-                    <span style={{ color: 'var(--color-success)' }}>テスト成功 ({testResult.count || 0}件取得)</span>
+                    <span style={{ color: 'var(--color-success)' }}>テスト成功 ({testResult?.count || 0}件取得)</span>
                   </>
                 ) : (
                   <>
