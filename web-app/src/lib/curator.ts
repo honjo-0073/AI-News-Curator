@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/generative-ai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { XMLParser } from 'fast-xml-parser';
 
 // RSS/Atom フィードの取得・パース
@@ -96,9 +96,9 @@ export async function scrapeArticlesWithGemini(
   htmlContent: string,
   systemPrompt: string
 ): Promise<Array<{ title: string; url: string }>> {
-  const ai = new GoogleGenAI({ apiKey });
+  const genAI = new GoogleGenerativeAI(apiKey);
   // 高速な最新Flashモデルを使用
-  const model = ai.getGenerativeModel({
+  const model = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',
     systemInstruction: systemPrompt,
     generationConfig: {
@@ -135,8 +135,8 @@ export async function summarizeAndCheckSecurity(
   articleContent: string,
   systemPrompt: string
 ): Promise<{ summary: string; securityRisk: boolean }> {
-  const ai = new GoogleGenAI({ apiKey });
-  const model = ai.getGenerativeModel({
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',
     systemInstruction: systemPrompt,
     generationConfig: {
@@ -160,3 +160,4 @@ export async function summarizeAndCheckSecurity(
     throw new Error('Gemini APIが正しい要約JSONフォーマットを返しませんでした。');
   }
 }
+
