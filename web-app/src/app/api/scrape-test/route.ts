@@ -37,19 +37,6 @@ const findFeedUrls = (pageUrl: string, html: string) => {
 const hasArticleLikeHtml = (html: string) =>
   html.length >= 500 && (html.includes('<article') || html.includes('<a') || html.includes('href'));
 
-const getErrorText = (error: any): string => {
-  const messages: string[] = [];
-  let current = error;
-
-  while (current) {
-    if (current.message) messages.push(String(current.message));
-    if (current.code) messages.push(String(current.code));
-    current = current.cause;
-  }
-
-  return messages.join(' ');
-};
-
 export async function POST(req: NextRequest) {
   try {
     const { url, type = 'AUTO', geminiApiKey, promptScrape } = await req.json();
