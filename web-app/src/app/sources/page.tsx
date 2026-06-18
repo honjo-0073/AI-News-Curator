@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import AuthGuard from '@/components/AuthGuard';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthGuard';
-import { Trash2, AlertTriangle, CheckCircle, RefreshCw, Layers } from 'lucide-react';
+import { Trash2, AlertTriangle, CheckCircle, RefreshCw, Layers, Wand2 } from 'lucide-react';
 
 interface Source {
   id: string;
@@ -32,7 +32,7 @@ function SourcesContent() {
   // 新規登録フォーム用
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
-  const [type, setType] = useState<'RSS' | 'HTML' | 'SPA'>('RSS');
+  const [type, setType] = useState<'AUTO' | 'RSS' | 'HTML' | 'SPA'>('AUTO');
   
   // テスト接続状態
   const [testing, setTesting] = useState(false);
@@ -43,6 +43,8 @@ function SourcesContent() {
     count?: number;
     previewOnly?: boolean;
     message?: string;
+    recommendedType?: 'RSS' | 'HTML' | 'SPA';
+    recommendedUrl?: string;
   } | null>(null);
 
   useEffect(() => {
@@ -76,23 +78,75 @@ function SourcesContent() {
     }
   };
 
+  const inferSourceName = (targetUrl: string) => {
+    if (name.trim()) return name.trim();
+    try {
+      return new URL(targetUrl).hostname.replace(/^www\./, '');
+    } catch {
+      return targetUrl;
+    }
+  };
+
+  const runScrapeTest = async () => {
+    const res = await fetch('/api/scrape-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url,
+        type,
+        geminiApiKey: geminiKey,
+        promptScrape
+      })
+    });
+    const data = await res.json();
+    setTestResult(data);
+
+    if (data.success && data.recommendedType) {
+      setType(data.recommendedType);
+      if (data.recommendedUrl) setUrl(data.recommendedUrl);
+    }
+
+    return data;
+  };
+
   // 新規登録
   const handleAddSource = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !url) return;
+    if (!url) return;
+
+    let sourceType: 'RSS' | 'HTML' | 'SPA' = type === 'AUTO' ? 'HTML' : type;
+    let sourceUrl = url;
+
+    if (type === 'AUTO') {
+      setTesting(true);
+      try {
+        const data = await runScrapeTest();
+        if (!data.success || !data.recommendedType) {
+          alert(data.error || '自動判定に失敗しました。URLを確認してください。');
+          return;
+        }
+        sourceType = data.recommendedType;
+        sourceUrl = data.recommendedUrl || url;
+      } catch (e) {
+        alert('自動判定中にエラーが発生しました。');
+        return;
+      } finally {
+        setTesting(false);
+      }
+    }
 
     const { error } = await supabase.from('sources').insert({
       user_id: user?.id,
-      name,
-      url,
-      type,
+      name: inferSourceName(sourceUrl),
+      url: sourceUrl,
+      type: sourceType,
       active: true
     });
 
     if (!error) {
       setName('');
       setUrl('');
-      setType('RSS');
+      setType('AUTO');
       setTestResult(null);
       loadSources();
     } else {
@@ -110,18 +164,7 @@ function SourcesContent() {
     setTestResult(null);
 
     try {
-      const res = await fetch('/api/scrape-test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url,
-          type,
-          geminiApiKey: geminiKey,
-          promptScrape
-        })
-      });
-      const data = await res.json();
-      setTestResult(data);
+      await runScrapeTest();
     } catch (e) {
       setTestResult({
         success: false,
@@ -161,7 +204,7 @@ function SourcesContent() {
           情報収集元設定
         </h2>
         <p style={{ color: 'var(--text-secondary)' }}>
-          情報を収集したいWebサイト、RSSフィードを登録し、正しく取得できるかテストします。
+          キャッチアップしたいサイトURLを入れるだけで、RSS / HTML / SPA のどれが適しているか自動判定して登録できます。
         </p>
       </div>
 
@@ -178,13 +221,12 @@ function SourcesContent() {
             <form onSubmit={handleAddSource} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <label style={{ fontSize: '0.85em', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
-                  サイト名 / ソース名
+                  サイト名 / ソース名（省略可）
                 </label>
                 <input 
                   type="text" 
                   className="form-input" 
-                  placeholder="例: TechCrunch Japan" 
-                  required
+                  placeholder="例: TechCrunch Japan（空ならURLから自動設定）"
                   value={name}
                   onChange={e => setName(e.target.value)}
                 />
@@ -192,7 +234,7 @@ function SourcesContent() {
 
               <div>
                 <label style={{ fontSize: '0.85em', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
-                  URL / RSSフィードURL
+                  サイトURL / RSSフィードURL
                 </label>
                 <input 
                   type="url" 
@@ -206,19 +248,20 @@ function SourcesContent() {
 
               <div>
                 <label style={{ fontSize: '0.85em', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
-                  取得タイプ
+                  取得タイプ（通常は自動判定でOK）
                 </label>
                 <select 
                   className="form-select" 
                   value={type} 
                   onChange={e => setType(e.target.value as any)}
                 >
+                  <option value="AUTO">自動判定（おすすめ）</option>
                   <option value="RSS">RSS (最も正確かつ軽量)</option>
                   <option value="HTML">HTML (静的HTMLのスクレイピング)</option>
                   <option value="SPA">SPA (動的JSレンダリングが必要なサイト)</option>
                 </select>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.75em', marginTop: '6px' }}>
-                  ※SPAはJS描画されるサイト（Note、一部のニュースサイトなど）に適用します。Jina経由で取得します。
+                  ※まずは自動判定を選んでください。RSSが見つかればRSS、なければHTML/SPAを判定します。
                 </p>
               </div>
 
@@ -230,15 +273,15 @@ function SourcesContent() {
                   onClick={handleTestConnection}
                   disabled={testing || !url}
                 >
-                  {testing ? <RefreshCw className="animate-spin" size={16} /> : '接続テスト実行'}
+                  {testing ? <RefreshCw className="animate-spin" size={16} /> : <><Wand2 size={16} /> 自動判定 / テスト</>}
                 </button>
                 <button 
                   type="submit" 
                   className="btn-primary" 
                   style={{ flex: 1, justifyContent: 'center' }}
-                  disabled={!name || !url}
+                  disabled={!url || testing}
                 >
-                  この内容で登録
+                  登録
                 </button>
               </div>
             </form>
@@ -264,6 +307,17 @@ function SourcesContent() {
                   </>
                 )}
               </h4>
+
+              {testResult.message && (
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9em', marginBottom: '12px', lineHeight: '1.5' }}>
+                  {testResult.message}
+                  {testResult.recommendedType && (
+                    <strong style={{ color: 'var(--color-success)', marginLeft: '6px' }}>
+                      推奨: {testResult.recommendedType}
+                    </strong>
+                  )}
+                </p>
+              )}
 
               {testResult.success && testResult.articles && (
                 <div style={{ maxHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>

@@ -125,6 +125,14 @@ function SettingsContent() {
         <p style={{ color: 'var(--text-secondary)' }}>
           各種APIキー、要約プロンプト、メール送信に使用するSMTPサーバーの設定を管理します。
         </p>
+        <div style={{ marginTop: '16px', background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.22)', borderRadius: '10px', padding: '16px', color: 'var(--text-secondary)', fontSize: '0.9em', lineHeight: '1.7' }}>
+          <strong style={{ color: 'var(--text-primary)' }}>この画面で設定するもの</strong>
+          <ul style={{ margin: '8px 0 0 18px', padding: 0 }}>
+            <li><strong>Gemini APIキー</strong>: 記事の抽出・要約に使います。</li>
+            <li><strong>SMTP設定</strong>: ニュースレターを「送信する側」のメール設定です。受信者のメールアドレスは「配信先」画面で登録します。</li>
+            <li><strong>プロンプト</strong>: AIにどのように記事を抽出・要約してほしいかの指示文です。最初は初期値のままで構いません。</li>
+          </ul>
+        </div>
       </div>
 
       <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
@@ -134,6 +142,10 @@ function SettingsContent() {
           <h3 style={{ fontSize: '1.2em', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Key size={18} className="gradient-text" /> AI (Gemini) 設定
           </h3>
+          <div style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '12px', borderRadius: '6px', fontSize: '0.85em', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '16px' }}>
+            Gemini APIキーは、登録したサイトから記事候補を抽出したり、記事本文を要約したりするために使います。
+            RSSだけで運用する場合も、記事要約にはGemini APIキーが必要です。
+          </div>
           
           <div>
             <label style={{ fontSize: '0.85em', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
@@ -167,6 +179,20 @@ function SettingsContent() {
           <h3 style={{ fontSize: '1.2em', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Mail size={18} className="gradient-text" /> メール配信 (SMTP) 設定
           </h3>
+
+          <div style={{ background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.22)', padding: '14px', borderRadius: '8px', fontSize: '0.86em', color: 'var(--text-secondary)', lineHeight: '1.7', marginBottom: '18px' }}>
+            <strong style={{ color: 'var(--text-primary)' }}>SMTPは「ニュースレターを送るための差出人設定」です。</strong>
+            <div style={{ marginTop: '6px' }}>
+              配信先のメールアドレスを登録するだけでは、アプリはメールを送れません。
+              Gmail / Outlook / 独自ドメインなど、送信に使うメールアカウントのSMTP情報を入力してください。
+            </div>
+            <ul style={{ margin: '8px 0 0 18px', padding: 0 }}>
+              <li><strong>587</strong> を使う場合: SSL/TLS接続のチェックは通常OFF</li>
+              <li><strong>465</strong> を使う場合: SSL/TLS接続のチェックはON</li>
+              <li>GmailやYahooでは、通常のログインパスワードではなく <strong>アプリパスワード</strong> が必要です。</li>
+              <li>まずは配信先に自分のメールを登録し、「テスト送信」で確認してください。</li>
+            </ul>
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px', marginBottom: '16px' }}>
             <div>
@@ -257,6 +283,16 @@ function SettingsContent() {
             </div>
           </div>
 
+          <div style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '12px', borderRadius: '6px', fontSize: '0.8em', color: 'var(--text-muted)', display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '12px' }}>
+            <Info size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div>
+              <strong style={{ color: 'var(--text-secondary)' }}>よく使う設定例:</strong>
+              <div style={{ marginTop: '6px' }}>Gmail: smtp.gmail.com / 587 / SSLチェックOFF、または 465 / SSLチェックON</div>
+              <div>Outlook・Microsoft 365: smtp.office365.com / 587 / SSLチェックOFF</div>
+              <div>Yahoo: smtp.mail.yahoo.com / 587 / SSLチェックOFF、または 465 / SSLチェックON</div>
+            </div>
+          </div>
+
           <div style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '12px', borderRadius: '6px', fontSize: '0.8em', color: 'var(--text-muted)', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
             <Info size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
             <div>
@@ -270,6 +306,9 @@ function SettingsContent() {
           <h3 style={{ fontSize: '1.2em', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Cpu size={18} className="gradient-text" /> キュレーション ＆ プロンプト設定
           </h3>
+          <div style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '12px', borderRadius: '6px', fontSize: '0.85em', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '16px' }}>
+            プロンプトはAIへの指示文です。最初は初期値のまま運用し、抽出される記事や要約の品質を見ながら少しずつ調整してください。
+          </div>
 
           <div style={{ marginBottom: '16px' }}>
             <label style={{ fontSize: '0.85em', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
