@@ -33,6 +33,16 @@ export const supabase = new Proxy({} as SupabaseClient, {
 });
 
 // サーバーサイド・管理者操作用クライアント (RLSをバイパスし、全ユーザーのバッチ処理等を実行可能)
+export const getSupabaseAuthClient = () => {
+  const config = getPublicSupabaseConfig();
+  return createClient(config.supabaseUrl, config.supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+};
+
 export const getSupabaseAdmin = () => {
   const config = getPublicSupabaseConfig();
   if (!supabaseServiceRoleKey) {
