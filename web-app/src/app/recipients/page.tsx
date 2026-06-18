@@ -159,7 +159,7 @@ function RecipientsContent() {
       <div>
         <h2 style={{ fontSize: '2em', marginBottom: '8px' }}>配信先アドレス設定</h2>
         <p style={{ color: 'var(--text-secondary)' }}>
-          ニュースレターの送信先となるメールアドレスのリストを管理します。
+          ニュースレターを受け取る人のメールアドレスを管理します。ここでは受信者のメールアドレスだけ登録すればOKです。送信元メールの設定は「システム設定」で行います。
         </p>
       </div>
 
@@ -171,7 +171,7 @@ function RecipientsContent() {
             <Mail size={18} className="gradient-text" /> 配信先の追加
           </h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85em', marginBottom: '16px', lineHeight: '1.5' }}>
-            1件ずつ追加するか、複数のメールアドレスを貼り付けてまとめて登録できます。
+            受信者はメールアドレスだけで登録できます。名前は省略可能です。複数人に送りたい場合は、メールアドレスをまとめて貼り付けてください。
           </p>
 
           <form onSubmit={handleAddRecipient} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

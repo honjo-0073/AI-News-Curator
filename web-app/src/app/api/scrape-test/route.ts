@@ -37,6 +37,19 @@ const findFeedUrls = (pageUrl: string, html: string) => {
 const hasArticleLikeHtml = (html: string) =>
   html.length >= 500 && (html.includes('<article') || html.includes('<a') || html.includes('href'));
 
+const getErrorText = (error: any): string => {
+  const messages: string[] = [];
+  let current = error;
+
+  while (current) {
+    if (current.message) messages.push(String(current.message));
+    if (current.code) messages.push(String(current.code));
+    current = current.cause;
+  }
+
+  return messages.join(' ');
+};
+
 export async function POST(req: NextRequest) {
   try {
     const { url, type = 'AUTO', geminiApiKey, promptScrape } = await req.json();
@@ -132,10 +145,12 @@ export async function POST(req: NextRequest) {
     } catch (scrapingError: any) {
       console.error('Test Scrape Connection Error:', scrapingError);
       
-      const errorMsg = scrapingError.message || '';
+      const errorMsg = getErrorText(scrapingError);
       let friendlyError = '接続に失敗しました。URLが正しいかご確認ください。';
 
-      if (errorMsg.includes('403')) {
+      if (errorMsg.includes('ERR_TLS_CERT_ALTNAME_INVALID') || errorMsg.includes('altnames') || errorMsg.includes('certificate')) {
+        friendlyError = 'サイトのSSL証明書がURLのドメインと一致していません。サイト側のSSL設定不備が原因です。サイト管理者に証明書設定を確認してもらうか、確認用に http:// から始まるURLで再試行してください。';
+      } else if (errorMsg.includes('403')) {
         friendlyError = 'アクセスが拒否されました (403 Forbidden)。サイト側でスクレイピング対策が導入されている可能性があります。RSSフィードが公開されていないかお調べください。';
       } else if (errorMsg.includes('404')) {
         friendlyError = 'ページが見つかりません (404 Not Found)。URLのスペルミスがないかご確認ください。';
