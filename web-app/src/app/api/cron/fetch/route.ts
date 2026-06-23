@@ -51,7 +51,9 @@ export async function POST(req: NextRequest) {
       newArticles: 0,
       errors: 0,
       skippedUsers: 0,
-      usersWithoutActiveSources: 0
+      usersWithoutActiveSources: 0,
+      registeredSources: 0,
+      inactiveSources: 0
     };
 
     // --- 3. ユーザーごとにキュレーション処理を実行 ---
@@ -73,12 +75,11 @@ export async function POST(req: NextRequest) {
       const promptScrape = userSetting.prompt_scrape;
       const promptReview = userSetting.prompt_review;
 
-      // ユーザーが登録しているアクティブな収集元の取得
-      const { data: sources, error: sourcesError } = await supabaseAdmin
+      // ユーザーが登録している収集元の取得
+      const { data: registeredSources, error: sourcesError } = await supabaseAdmin
         .from('sources')
         .select('*')
-        .eq('user_id', userId)
-        .eq('active', true);
+        .eq('user_id', userId);
 
       if (sourcesError) {
         console.error(`Failed to fetch sources for user ${userId}:`, sourcesError);
@@ -87,14 +88,19 @@ export async function POST(req: NextRequest) {
       }
 
       summaryStats.processedUsers++;
+      summaryStats.registeredSources += registeredSources?.length || 0;
 
-      if (!sources || sources.length === 0) {
-        console.warn(`No active sources found for user ${userId}.`);
+      // 古いデータで active が NULL / 未設定の場合は有効扱いにして、登録済みURLが無視されないようにする
+      const activeSources = (registeredSources || []).filter(source => source.active !== false);
+      summaryStats.inactiveSources += (registeredSources?.length || 0) - activeSources.length;
+
+      if (activeSources.length === 0) {
+        console.warn(`No active sources found for user ${userId}. Registered sources: ${registeredSources?.length || 0}.`);
         summaryStats.usersWithoutActiveSources++;
         continue;
       }
 
-      for (const source of sources) {
+      for (const source of activeSources) {
         summaryStats.processedSources++;
         let fetchedArticles: Array<{ title: string; url: string; content?: string }> = [];
         let rawContent = '';

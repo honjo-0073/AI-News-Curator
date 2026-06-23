@@ -116,7 +116,13 @@ function DashboardContent() {
         const stats = data.stats || {};
         const detailMessages: string[] = [];
         if ((stats.skippedUsers || 0) > 0) detailMessages.push('Gemini APIキー未設定のため処理をスキップしました');
-        if ((stats.usersWithoutActiveSources || 0) > 0) detailMessages.push('有効な収集元がありません');
+        if ((stats.usersWithoutActiveSources || 0) > 0) {
+          if ((stats.registeredSources || 0) > 0) {
+            detailMessages.push(`登録済み収集元${stats.registeredSources}件のうち有効な収集元がありません（無効${stats.inactiveSources || 0}件）`);
+          } else {
+            detailMessages.push('このユーザーに紐づく収集元がありません');
+          }
+        }
         if ((stats.processedSources || 0) === 0 && detailMessages.length === 0) detailMessages.push('処理対象の収集元がありません');
         if ((stats.fetchedArticles || 0) > 0 && (stats.newArticles || 0) === 0) detailMessages.push(`取得候補${stats.fetchedArticles}件はすべて登録済みです`);
 
