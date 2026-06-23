@@ -39,7 +39,13 @@ export async function POST(req: NextRequest) {
     let summaryStats = {
       processedUsers: 0,
       sentEmails: 0,
-      sentArticlesCount: 0
+      sentArticlesCount: 0,
+      approvedArticlesCount: 0,
+      activeRecipientsCount: 0,
+      skippedMissingSmtp: 0,
+      skippedNoApprovedArticles: 0,
+      skippedNoActiveRecipients: 0,
+      errors: 0
     };
 
     for (const userId of usersToProcess) {
@@ -52,6 +58,7 @@ export async function POST(req: NextRequest) {
 
       if (settingError || !userSetting?.smtp_settings) {
         console.error(`Skipping user ${userId} due to missing SMTP settings.`);
+        summaryStats.skippedMissingSmtp++;
         continue;
       }
 
@@ -66,11 +73,15 @@ export async function POST(req: NextRequest) {
 
       if (articlesError) {
         console.error(`Failed to fetch approved articles for user ${userId}:`, articlesError);
+        summaryStats.errors++;
         continue;
       }
 
+      summaryStats.approvedArticlesCount += approvedArticles.length;
+
       if (approvedArticles.length === 0) {
         console.log(`No approved articles to send for user ${userId}.`);
+        summaryStats.skippedNoApprovedArticles++;
         continue;
       }
 
@@ -83,13 +94,16 @@ export async function POST(req: NextRequest) {
 
       if (recipientsError) {
         console.error(`Failed to fetch recipients for user ${userId}:`, recipientsError);
+        summaryStats.errors++;
         continue;
       }
 
       const bccList = recipients.map(r => r.email).filter(Boolean);
+      summaryStats.activeRecipientsCount += bccList.length;
 
       if (bccList.length === 0) {
         console.log(`No active recipients found for user ${userId}.`);
+        summaryStats.skippedNoActiveRecipients++;
         continue;
       }
 
@@ -162,6 +176,7 @@ export async function POST(req: NextRequest) {
 
       } catch (emailError) {
         console.error(`SMTP transmission failed for user ${userId}:`, emailError);
+        summaryStats.errors++;
       }
     }
 

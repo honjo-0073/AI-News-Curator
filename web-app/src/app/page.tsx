@@ -9,6 +9,7 @@ import { Play, Send, ListCollapse, Database, Users, Calendar, AlertTriangle, Arr
 interface Stats {
   sourcesCount: number;
   pendingArticlesCount: number;
+  approvedArticlesCount: number;
   recipientsCount: number;
 }
 
@@ -29,7 +30,7 @@ export default function DashboardPage() {
 
 function DashboardContent() {
   const { user } = useAuth();
-  const [stats, setStats] = useState<Stats>({ sourcesCount: 0, pendingArticlesCount: 0, recipientsCount: 0 });
+  const [stats, setStats] = useState<Stats>({ sourcesCount: 0, pendingArticlesCount: 0, approvedArticlesCount: 0, recipientsCount: 0 });
   const [recentArticles, setRecentArticles] = useState<ArticlePreview[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -63,7 +64,14 @@ function DashboardContent() {
       .select('*', { count: 'exact', head: true })
       .eq('status', 'pending');
 
-    // 3. 宛先数
+    // 3. 配信可能な承認済み記事数
+    const { count: approvedCount } = await supabase
+      .from('articles')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'approved')
+      .eq('security_flag', false);
+
+    // 4. 宛先数
     const { count: recipientsCount } = await supabase
       .from('recipients')
       .select('*', { count: 'exact', head: true });
@@ -71,10 +79,11 @@ function DashboardContent() {
     setStats({
       sourcesCount: sourcesCount || 0,
       pendingArticlesCount: pendingCount || 0,
+      approvedArticlesCount: approvedCount || 0,
       recipientsCount: recipientsCount || 0
     });
 
-    // 4. 最近の記事プレビュー (最新5件)
+    // 5. 最近の記事プレビュー (最新5件)
     const { data: articles } = await supabase
       .from('articles')
       .select('id, title, source_name, fetched_at')
@@ -85,7 +94,7 @@ function DashboardContent() {
       setRecentArticles(articles as ArticlePreview[]);
     }
 
-    // 5. 設定状況のロード
+    // 6. 設定状況のロード
     const { data: setting } = await supabase
       .from('user_settings')
       .select('gemini_api_key, smtp_settings')
@@ -113,7 +122,21 @@ function DashboardContent() {
       });
       const data = await res.json();
       if (data.success) {
-        setActionMessage(`キュレーション完了！ 新規記事: ${data.stats.newArticles}件 / エラー: ${data.stats.errors}件`);
+        const stats = data.stats || {};
+        const detailMessages: string[] = [];
+        if ((stats.skippedUsers || 0) > 0) detailMessages.push('Gemini APIキー未設定のため処理をスキップしました');
+        if ((stats.usersWithoutActiveSources || 0) > 0) {
+          if ((stats.registeredSources || 0) > 0) {
+            detailMessages.push(`登録済み収集元${stats.registeredSources}件がすべて無効です。収集元設定で有効化してください（無効${stats.inactiveSources || 0}件）`);
+          } else {
+            detailMessages.push('このユーザーに紐づく収集元がありません');
+          }
+        }
+        if ((stats.processedSources || 0) === 0 && detailMessages.length === 0) detailMessages.push('処理対象の収集元がありません');
+        if ((stats.fetchedArticles || 0) > 0 && (stats.newArticles || 0) === 0) detailMessages.push(`取得候補${stats.fetchedArticles}件はすべて登録済みです`);
+
+        const suffix = detailMessages.length ? `（${detailMessages.join(' / ')}）` : '';
+        setActionMessage(`キュレーション完了！ 処理元: ${stats.processedSources || 0}件 / 取得候補: ${stats.fetchedArticles || 0}件 / 新規記事: ${stats.newArticles || 0}件 / エラー: ${stats.errors || 0}件${suffix}`);
         loadStatsAndPreviews();
       } else {
         setActionMessage(`エラーが発生しました: ${data.error}`);
@@ -140,10 +163,16 @@ function DashboardContent() {
       });
       const data = await res.json();
       if (data.success) {
-        if (data.stats.sentEmails > 0) {
-          setActionMessage(`配信完了！ ${data.stats.processedUsers}件のユーザーのニュースレターを配信しました。`);
+        const sendStats = data.stats || {};
+        if ((sendStats.sentEmails || 0) > 0) {
+          setActionMessage(`配信完了！ ${sendStats.sentEmails}通 / 記事${sendStats.sentArticlesCount || 0}件を配信しました。`);
         } else {
-          setActionMessage('配信対象の記事（承認済み）がない、または有効な宛先が登録されていません。');
+          const detailMessages: string[] = [];
+          if ((sendStats.skippedMissingSmtp || 0) > 0) detailMessages.push('SMTP設定が未完了です');
+          if ((sendStats.skippedNoApprovedArticles || 0) > 0) detailMessages.push('配信可能な承認済み記事がありません');
+          if ((sendStats.skippedNoActiveRecipients || 0) > 0) detailMessages.push('有効な宛先がありません');
+          if ((sendStats.errors || 0) > 0) detailMessages.push('送信処理でエラーが発生しました');
+          setActionMessage(detailMessages.length ? `配信されませんでした（${detailMessages.join(' / ')}）` : '配信対象がありません。');
         }
         loadStatsAndPreviews();
       } else {
@@ -210,7 +239,8 @@ function DashboardContent() {
           <button 
             onClick={handleSendNewsletter} 
             className="btn-secondary" 
-            disabled={sendingNewsletter || !hasSmtp || stats.pendingArticlesCount === 0}
+            disabled={sendingNewsletter || !hasSmtp || stats.approvedArticlesCount === 0}
+            title={!hasSmtp ? 'SMTP設定を保存してください' : stats.approvedArticlesCount === 0 ? '配信するには記事を承認してください' : undefined}
             style={{ minWidth: '200px', borderColor: 'var(--color-success)', color: 'var(--color-success)' }}
           >
             <Send size={16} /> {sendingNewsletter ? '配信中...' : 'ニュースレターを今すぐ配信'}
