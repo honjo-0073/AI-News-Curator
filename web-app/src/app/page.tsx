@@ -118,7 +118,7 @@ function DashboardContent() {
         if ((stats.skippedUsers || 0) > 0) detailMessages.push('Gemini APIキー未設定のため処理をスキップしました');
         if ((stats.usersWithoutActiveSources || 0) > 0) {
           if ((stats.registeredSources || 0) > 0) {
-            detailMessages.push(`登録済み収集元${stats.registeredSources}件のうち有効な収集元がありません（無効${stats.inactiveSources || 0}件）`);
+            detailMessages.push(`登録済み収集元${stats.registeredSources}件がすべて無効です。収集元設定で有効化してください（無効${stats.inactiveSources || 0}件）`);
           } else {
             detailMessages.push('このユーザーに紐づく収集元がありません');
           }

@@ -195,6 +195,22 @@ function SourcesContent() {
     }
   };
 
+  const enableAllSources = async () => {
+    if (!confirm('登録済みの収集元をすべて有効にします。よろしいですか？')) return;
+
+    const { error } = await supabase
+      .from('sources')
+      .update({ active: true })
+      .eq('user_id', user?.id)
+      .or('active.is.false,active.is.null');
+
+    if (!error) {
+      loadSources();
+    } else {
+      alert('一括有効化に失敗しました: ' + error.message);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
       
@@ -362,7 +378,19 @@ function SourcesContent() {
 
         {/* 右側：登録済みの収集元一覧 */}
         <div className="glass-card" style={{ padding: '24px', height: 'fit-content' }}>
-          <h3 style={{ fontSize: '1.2em', marginBottom: '16px' }}>登録済みの収集元 ({sources.length})</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', marginBottom: '16px' }}>
+            <h3 style={{ fontSize: '1.2em', marginBottom: 0 }}>登録済みの収集元 ({sources.length})</h3>
+            {sources.some(src => !src.active) && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={enableAllSources}
+                style={{ fontSize: '0.8em', padding: '8px 12px' }}
+              >
+                すべて有効化
+              </button>
+            )}
+          </div>
           
           {loading ? (
             <p style={{ color: 'var(--text-secondary)' }}>読み込み中...</p>
@@ -393,7 +421,7 @@ function SourcesContent() {
                     <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
                       <input 
                         type="checkbox" 
-                        checked={src.active}
+                        checked={!!src.active}
                         onChange={() => toggleActive(src)}
                         style={{ width: '16px', height: '16px', cursor: 'pointer' }}
                       />
