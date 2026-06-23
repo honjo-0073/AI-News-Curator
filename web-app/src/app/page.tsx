@@ -113,7 +113,15 @@ function DashboardContent() {
       });
       const data = await res.json();
       if (data.success) {
-        setActionMessage(`キュレーション完了！ 新規記事: ${data.stats.newArticles}件 / エラー: ${data.stats.errors}件`);
+        const stats = data.stats || {};
+        const detailMessages: string[] = [];
+        if ((stats.skippedUsers || 0) > 0) detailMessages.push('Gemini APIキー未設定のため処理をスキップしました');
+        if ((stats.usersWithoutActiveSources || 0) > 0) detailMessages.push('有効な収集元がありません');
+        if ((stats.processedSources || 0) === 0 && detailMessages.length === 0) detailMessages.push('処理対象の収集元がありません');
+        if ((stats.fetchedArticles || 0) > 0 && (stats.newArticles || 0) === 0) detailMessages.push(`取得候補${stats.fetchedArticles}件はすべて登録済みです`);
+
+        const suffix = detailMessages.length ? `（${detailMessages.join(' / ')}）` : '';
+        setActionMessage(`キュレーション完了！ 処理元: ${stats.processedSources || 0}件 / 取得候補: ${stats.fetchedArticles || 0}件 / 新規記事: ${stats.newArticles || 0}件 / エラー: ${stats.errors || 0}件${suffix}`);
         loadStatsAndPreviews();
       } else {
         setActionMessage(`エラーが発生しました: ${data.error}`);
