@@ -46,8 +46,14 @@ export async function POST(req: NextRequest) {
     let summaryStats = {
       processedUsers: 0,
       processedSources: 0,
+      fetchedArticles: 0,
+      duplicateArticles: 0,
       newArticles: 0,
-      errors: 0
+      errors: 0,
+      skippedUsers: 0,
+      usersWithoutActiveSources: 0,
+      registeredSources: 0,
+      inactiveSources: 0
     };
 
     // --- 3. ユーザーごとにキュレーション処理を実行 ---
@@ -61,6 +67,7 @@ export async function POST(req: NextRequest) {
 
       if (settingError || !userSetting?.gemini_api_key) {
         console.error(`Skipping user ${userId} due to missing Gemini API key.`);
+        summaryStats.skippedUsers++;
         continue;
       }
 
@@ -68,21 +75,32 @@ export async function POST(req: NextRequest) {
       const promptScrape = userSetting.prompt_scrape;
       const promptReview = userSetting.prompt_review;
 
-      // ユーザーが登録しているアクティブな収集元の取得
-      const { data: sources, error: sourcesError } = await supabaseAdmin
+      // ユーザーが登録している収集元の取得
+      const { data: registeredSources, error: sourcesError } = await supabaseAdmin
         .from('sources')
         .select('*')
-        .eq('user_id', userId)
-        .eq('active', true);
+        .eq('user_id', userId);
 
       if (sourcesError) {
         console.error(`Failed to fetch sources for user ${userId}:`, sourcesError);
+        summaryStats.errors++;
         continue;
       }
 
       summaryStats.processedUsers++;
+      summaryStats.registeredSources += registeredSources?.length || 0;
 
-      for (const source of sources) {
+      // 古いデータで active が NULL / 未設定の場合は有効扱いにして、登録済みURLが無視されないようにする
+      const activeSources = (registeredSources || []).filter(source => source.active !== false);
+      summaryStats.inactiveSources += (registeredSources?.length || 0) - activeSources.length;
+
+      if (activeSources.length === 0) {
+        console.warn(`No active sources found for user ${userId}. Registered sources: ${registeredSources?.length || 0}.`);
+        summaryStats.usersWithoutActiveSources++;
+        continue;
+      }
+
+      for (const source of activeSources) {
         summaryStats.processedSources++;
         let fetchedArticles: Array<{ title: string; url: string; content?: string }> = [];
         let rawContent = '';
@@ -97,20 +115,27 @@ export async function POST(req: NextRequest) {
           } else if (source.type === 'SPA') {
             rawContent = await fetchSpa(source.url);
             fetchedArticles = await scrapeArticlesWithGemini(apiKey, rawContent, promptScrape);
+          } else {
+            throw new Error(`Unsupported source type: ${source.type || '未設定'}`);
           }
+
+          summaryStats.fetchedArticles += fetchedArticles.length;
 
           // B. 取得済みの既存URLリストを取得して重複排除
           const articleUrls = fetchedArticles.map(a => a.url);
-          const { data: existingArticles, error: checkError } = await supabaseAdmin
-            .from('articles')
-            .select('url')
-            .eq('user_id', userId)
-            .in('url', articleUrls);
+          const existingArticles = articleUrls.length > 0
+            ? await supabaseAdmin
+              .from('articles')
+              .select('url')
+              .eq('user_id', userId)
+              .in('url', articleUrls)
+            : { data: [], error: null };
 
-          if (checkError) throw checkError;
-          const existingUrls = new Set(existingArticles.map(a => a.url));
+          if (existingArticles.error) throw existingArticles.error;
+          const existingUrls = new Set((existingArticles.data || []).map(a => a.url));
 
           const newArticles = fetchedArticles.filter(a => !existingUrls.has(a.url));
+          summaryStats.duplicateArticles += fetchedArticles.length - newArticles.length;
 
           // C. 各新着記事の要約 ＆ セキュリティリスク判定
           for (const article of newArticles) {
