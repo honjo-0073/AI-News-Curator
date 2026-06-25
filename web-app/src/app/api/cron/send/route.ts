@@ -3,6 +3,10 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { markWeeklyTriggerRun, shouldRunWeeklyTrigger } from '@/lib/scheduler';
 import nodemailer from 'nodemailer';
 
+export async function GET(req: NextRequest) {
+  return POST(req);
+}
+
 export async function POST(req: NextRequest) {
   try {
     // --- 1. セキュリティ検証（Cron Secretのチェック） ---

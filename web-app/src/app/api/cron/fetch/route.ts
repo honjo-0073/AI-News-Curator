@@ -6,6 +6,10 @@ import { markWeeklyTriggerRun, shouldRunWeeklyTrigger } from '@/lib/scheduler';
 // レートリミット回避用のスリープヘルパー
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+export async function GET(req: NextRequest) {
+  return POST(req);
+}
+
 export async function POST(req: NextRequest) {
   try {
     // --- 1. セキュリティ検証（Cron Secretのチェック） ---
