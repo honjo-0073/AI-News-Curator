@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { fetchRss, fetchHtml, fetchSpa, scrapeArticlesWithGemini, summarizeAndCheckSecurity } from '@/lib/curator';
+import { markWeeklyTriggerRun, shouldRunWeeklyTrigger } from '@/lib/scheduler';
 
 // レートリミット回避用のスリープヘルパー
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -27,6 +28,7 @@ export async function POST(req: NextRequest) {
     
     // --- 2. 処理対象ユーザーの決定 ---
     let usersToProcess: string[] = [];
+    let skippedBySchedule = 0;
 
     if (manualUserId) {
       usersToProcess = [manualUserId];
@@ -34,13 +36,15 @@ export async function POST(req: NextRequest) {
       // 自動定期実行の場合：設定が登録されているすべてのアクティブなユーザーをスキャン
       const { data: settings, error: settingsError } = await supabaseAdmin
         .from('user_settings')
-        .select('user_id')
+        .select('user_id, fetch_trigger_settings')
         .not('gemini_api_key', 'is', null);
 
       if (settingsError) {
         throw new Error(`Failed to fetch user settings: ${settingsError.message}`);
       }
-      usersToProcess = settings.map(s => s.user_id);
+      const scheduledSettings = settings.filter(setting => shouldRunWeeklyTrigger(setting.fetch_trigger_settings));
+      skippedBySchedule = settings.length - scheduledSettings.length;
+      usersToProcess = scheduledSettings.map(setting => setting.user_id);
     }
 
     let summaryStats = {
@@ -53,7 +57,8 @@ export async function POST(req: NextRequest) {
       skippedUsers: 0,
       usersWithoutActiveSources: 0,
       registeredSources: 0,
-      inactiveSources: 0
+      inactiveSources: 0,
+      skippedBySchedule
     };
 
     // --- 3. ユーザーごとにキュレーション処理を実行 ---
@@ -99,6 +104,8 @@ export async function POST(req: NextRequest) {
         summaryStats.usersWithoutActiveSources++;
         continue;
       }
+
+      let successfulSourcesForUser = 0;
 
       for (const source of activeSources) {
         summaryStats.processedSources++;
@@ -182,6 +189,7 @@ export async function POST(req: NextRequest) {
             trigger_type: manualUserId ? 'manual' : 'auto',
             status: 'success'
           });
+          successfulSourcesForUser++;
 
         } catch (sourceError: any) {
           console.error(`Error processing source ${source.name} (${source.url}) for user ${userId}:`, sourceError);
@@ -196,6 +204,16 @@ export async function POST(req: NextRequest) {
             error_message: sourceError.message || '予期せぬエラーが発生しました。'
           });
         }
+      }
+
+      if (!manualUserId && successfulSourcesForUser > 0) {
+        await supabaseAdmin
+          .from('user_settings')
+          .update({
+            fetch_trigger_settings: markWeeklyTriggerRun(userSetting.fetch_trigger_settings),
+            updated_at: new Date()
+          })
+          .eq('user_id', userId);
       }
     }
 

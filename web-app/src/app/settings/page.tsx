@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import AuthGuard from '@/components/AuthGuard';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthGuard';
-import { Settings, Save, Key, Mail, Cpu, Eye, EyeOff, Info } from 'lucide-react';
+import { Settings, Save, Key, Mail, Cpu, Eye, EyeOff, Info, Calendar } from 'lucide-react';
 
 export default function SettingsPage() {
   return (
@@ -36,6 +36,30 @@ function SettingsContent() {
   const [smtpFrom, setSmtpFrom] = useState('');
   const [showSmtpPass, setShowSmtpPass] = useState(false);
 
+  // 自動実行設定（曜日は 0=日曜, 1=月曜 ... 6=土曜）
+  const [fetchTriggerEnabled, setFetchTriggerEnabled] = useState(false);
+  const [fetchDaysOfWeek, setFetchDaysOfWeek] = useState<number[]>([]);
+  const [fetchLastRunDate, setFetchLastRunDate] = useState<string | null>(null);
+  const [sendTriggerEnabled, setSendTriggerEnabled] = useState(false);
+  const [sendDaysOfWeek, setSendDaysOfWeek] = useState<number[]>([]);
+  const [sendLastRunDate, setSendLastRunDate] = useState<string | null>(null);
+
+  const weekDays = [
+    { value: 0, label: '日' },
+    { value: 1, label: '月' },
+    { value: 2, label: '火' },
+    { value: 3, label: '水' },
+    { value: 4, label: '木' },
+    { value: 5, label: '金' },
+    { value: 6, label: '土' },
+  ];
+
+  const toggleDay = (days: number[], day: number) => (
+    days.includes(day)
+      ? days.filter(value => value !== day)
+      : [...days, day].sort((a, b) => a - b)
+  );
+
   useEffect(() => {
     if (user) {
       loadSettings();
@@ -65,6 +89,16 @@ function SettingsContent() {
         setSmtpPass(smtp.auth?.pass || '');
         setSmtpFrom(smtp.from || '');
       }
+
+      const fetchTrigger = data.fetch_trigger_settings as any;
+      setFetchTriggerEnabled(!!fetchTrigger?.enabled);
+      setFetchDaysOfWeek(Array.isArray(fetchTrigger?.daysOfWeek) ? fetchTrigger.daysOfWeek : []);
+      setFetchLastRunDate(fetchTrigger?.last_run_date || null);
+
+      const sendTrigger = data.send_trigger_settings as any;
+      setSendTriggerEnabled(!!sendTrigger?.enabled);
+      setSendDaysOfWeek(Array.isArray(sendTrigger?.daysOfWeek) ? sendTrigger.daysOfWeek : []);
+      setSendLastRunDate(sendTrigger?.last_run_date || null);
     }
     setLoading(false);
   };
@@ -93,6 +127,16 @@ function SettingsContent() {
         prompt_scrape: promptScrape,
         prompt_review: promptReview,
         smtp_settings: smtpSettings,
+        fetch_trigger_settings: {
+          enabled: fetchTriggerEnabled,
+          daysOfWeek: fetchDaysOfWeek,
+          last_run_date: fetchLastRunDate
+        },
+        send_trigger_settings: {
+          enabled: sendTriggerEnabled,
+          daysOfWeek: sendDaysOfWeek,
+          last_run_date: sendLastRunDate
+        },
         updated_at: new Date()
       })
       .eq('user_id', user?.id);
@@ -297,6 +341,83 @@ function SettingsContent() {
             <Info size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
             <div>
               Gmailを使用する場合は、事前にGoogleアカウントの設定で二段階認証を有効化し、<strong>「アプリパスワード」</strong>を生成してそのパスワードを入力する必要があります。通常のログインパスワードでは接続できません。
+            </div>
+          </div>
+        </div>
+
+        {/* 自動実行設定 */}
+        <div className="glass-card" style={{ padding: '24px' }}>
+          <h3 style={{ fontSize: '1.2em', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Calendar size={18} className="gradient-text" /> 自動実行設定
+          </h3>
+          <div style={{ background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.22)', padding: '14px', borderRadius: '8px', fontSize: '0.86em', color: 'var(--text-secondary)', lineHeight: '1.7', marginBottom: '18px' }}>
+            Gemini API の無料枠を考慮し、自動収集・自動配信は指定した曜日につき1回だけ実行されます。
+            曜日の判定は <strong style={{ color: 'var(--text-primary)' }}>Asia/Tokyo</strong> 基準です。
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px' }}>
+            <div style={{ background: 'rgba(255, 255, 255, 0.02)', borderRadius: '10px', padding: '16px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px', marginBottom: '12px' }}>
+                <input
+                  type="checkbox"
+                  checked={fetchTriggerEnabled}
+                  onChange={e => setFetchTriggerEnabled(e.target.checked)}
+                  style={{ width: '18px', height: '18px' }}
+                />
+                <span style={{ fontWeight: 700 }}>自動収集を有効にする</span>
+              </label>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.8em', lineHeight: '1.6', marginBottom: '12px' }}>
+                指定した曜日に、登録済みの収集元から記事候補を収集します。
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {weekDays.map(day => (
+                  <label key={`fetch-${day.value}`} style={{ display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid var(--border-color)', borderRadius: '999px', padding: '8px 12px', cursor: 'pointer', background: fetchDaysOfWeek.includes(day.value) ? 'rgba(59, 130, 246, 0.16)' : 'transparent' }}>
+                    <input
+                      type="checkbox"
+                      checked={fetchDaysOfWeek.includes(day.value)}
+                      onChange={() => setFetchDaysOfWeek(days => toggleDay(days, day.value))}
+                    />
+                    <span>{day.label}</span>
+                  </label>
+                ))}
+              </div>
+              {fetchLastRunDate && (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.75em', marginTop: '12px' }}>
+                  最終自動収集日: {fetchLastRunDate}
+                </p>
+              )}
+            </div>
+
+            <div style={{ background: 'rgba(255, 255, 255, 0.02)', borderRadius: '10px', padding: '16px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px', marginBottom: '12px' }}>
+                <input
+                  type="checkbox"
+                  checked={sendTriggerEnabled}
+                  onChange={e => setSendTriggerEnabled(e.target.checked)}
+                  style={{ width: '18px', height: '18px' }}
+                />
+                <span style={{ fontWeight: 700 }}>自動配信を有効にする</span>
+              </label>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.8em', lineHeight: '1.6', marginBottom: '12px' }}>
+                指定した曜日に、承認済みかつセキュリティリスクなしの記事を配信します。配信対象が0件でもその日は実行済みになります。
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {weekDays.map(day => (
+                  <label key={`send-${day.value}`} style={{ display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid var(--border-color)', borderRadius: '999px', padding: '8px 12px', cursor: 'pointer', background: sendDaysOfWeek.includes(day.value) ? 'rgba(59, 130, 246, 0.16)' : 'transparent' }}>
+                    <input
+                      type="checkbox"
+                      checked={sendDaysOfWeek.includes(day.value)}
+                      onChange={() => setSendDaysOfWeek(days => toggleDay(days, day.value))}
+                    />
+                    <span>{day.label}</span>
+                  </label>
+                ))}
+              </div>
+              {sendLastRunDate && (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.75em', marginTop: '12px' }}>
+                  最終自動配信日: {sendLastRunDate}
+                </p>
+              )}
             </div>
           </div>
         </div>

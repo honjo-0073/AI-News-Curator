@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
+import { markWeeklyTriggerRun, shouldRunWeeklyTrigger } from '@/lib/scheduler';
 import nodemailer from 'nodemailer';
 
 export async function POST(req: NextRequest) {
@@ -23,6 +24,7 @@ export async function POST(req: NextRequest) {
     
     // --- 2. 処理対象ユーザーの決定 ---
     let usersToProcess: string[] = [];
+    let skippedBySchedule = 0;
 
     if (manualUserId) {
       usersToProcess = [manualUserId];
@@ -30,10 +32,12 @@ export async function POST(req: NextRequest) {
       // 全ユーザーをスキャン
       const { data: settings, error: settingsError } = await supabaseAdmin
         .from('user_settings')
-        .select('user_id');
+        .select('user_id, send_trigger_settings');
 
       if (settingsError) throw settingsError;
-      usersToProcess = settings.map(s => s.user_id);
+      const scheduledSettings = settings.filter(setting => shouldRunWeeklyTrigger(setting.send_trigger_settings));
+      skippedBySchedule = settings.length - scheduledSettings.length;
+      usersToProcess = scheduledSettings.map(setting => setting.user_id);
     }
 
     let summaryStats = {
@@ -45,7 +49,19 @@ export async function POST(req: NextRequest) {
       skippedMissingSmtp: 0,
       skippedNoApprovedArticles: 0,
       skippedNoActiveRecipients: 0,
+      skippedBySchedule,
       errors: 0
+    };
+
+    const markSendTriggerExecuted = async (userId: string, currentSettings: any) => {
+      if (manualUserId) return;
+      await supabaseAdmin
+        .from('user_settings')
+        .update({
+          send_trigger_settings: markWeeklyTriggerRun(currentSettings),
+          updated_at: new Date()
+        })
+        .eq('user_id', userId);
     };
 
     for (const userId of usersToProcess) {
@@ -82,6 +98,7 @@ export async function POST(req: NextRequest) {
       if (approvedArticles.length === 0) {
         console.log(`No approved articles to send for user ${userId}.`);
         summaryStats.skippedNoApprovedArticles++;
+        await markSendTriggerExecuted(userId, userSetting.send_trigger_settings);
         continue;
       }
 
@@ -104,6 +121,7 @@ export async function POST(req: NextRequest) {
       if (bccList.length === 0) {
         console.log(`No active recipients found for user ${userId}.`);
         summaryStats.skippedNoActiveRecipients++;
+        await markSendTriggerExecuted(userId, userSetting.send_trigger_settings);
         continue;
       }
 
@@ -170,6 +188,8 @@ export async function POST(req: NextRequest) {
         if (updateError) {
           console.error(`Failed to update article status to sent for user ${userId}:`, updateError);
         }
+
+        await markSendTriggerExecuted(userId, userSetting.send_trigger_settings);
 
         summaryStats.sentEmails++;
         summaryStats.sentArticlesCount += approvedArticles.length;
