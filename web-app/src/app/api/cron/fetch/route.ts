@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { fetchRss, fetchHtml, fetchSpa, scrapeArticlesWithGemini, summarizeAndCheckSecurity } from '@/lib/curator';
+import { fetchRss, fetchHtmlAdvanced, fetchSpa, scrapeArticlesWithGemini, summarizeAndCheckSecurity, fetchArticleContent } from '@/lib/curator';
 import { markWeeklyTriggerRun, shouldRunWeeklyTrigger } from '@/lib/scheduler';
 
 // レートリミット回避用のスリープヘルパー
@@ -121,11 +121,15 @@ export async function POST(req: NextRequest) {
           if (source.type === 'RSS') {
             fetchedArticles = await fetchRss(source.url);
           } else if (source.type === 'HTML') {
-            rawContent = await fetchHtml(source.url);
-            fetchedArticles = await scrapeArticlesWithGemini(apiKey, rawContent, promptScrape);
+            const htmlResult = await fetchHtmlAdvanced(source.url);
+            if (htmlResult.blocked) {
+              throw new Error(`HTML取得結果がブロックページの可能性があります: ${htmlResult.blockReason || 'unknown'}`);
+            }
+            rawContent = htmlResult.html;
+            fetchedArticles = await scrapeArticlesWithGemini(apiKey, rawContent, promptScrape, htmlResult.finalUrl || source.url);
           } else if (source.type === 'SPA') {
             rawContent = await fetchSpa(source.url);
-            fetchedArticles = await scrapeArticlesWithGemini(apiKey, rawContent, promptScrape);
+            fetchedArticles = await scrapeArticlesWithGemini(apiKey, rawContent, promptScrape, source.url);
           } else {
             throw new Error(`Unsupported source type: ${source.type || '未設定'}`);
           }
@@ -155,11 +159,13 @@ export async function POST(req: NextRequest) {
 
             let articleBody = article.title + '\n\n' + (article.content || '');
 
-            // RSS等の場合に詳細本文を追加取得する（任意）
-            if (!article.content && source.type === 'RSS') {
+            // 詳細本文を追加取得する（失敗時はタイトル/フィード本文のみで進行）
+            if (!article.content) {
               try {
-                const html = await fetchHtml(article.url);
-                articleBody += '\n\n' + html.replace(/<[^>]*>?/gm, '').substring(0, 5000);
+                const articleContent = await fetchArticleContent(article.url);
+                if (articleContent) {
+                  articleBody += '\n\n' + articleContent;
+                }
               } catch (e) {
                 // 本文取得失敗でもタイトルで進行
               }

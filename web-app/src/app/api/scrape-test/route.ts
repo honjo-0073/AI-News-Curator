@@ -1,41 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchRss, fetchHtml, fetchSpa, scrapeArticlesWithGemini } from '@/lib/curator';
+import { fetchRss, fetchHtmlAdvanced, fetchSpa, scrapeArticlesWithGemini, findFeedUrls, hasArticleLikeHtml, FetchDiagnostic, extractArticleCandidates } from '@/lib/curator';
 
 type SourceType = 'AUTO' | 'RSS' | 'HTML' | 'SPA';
 
 const defaultPrompt = 'あなたは有能なデータ抽出アシスタントです。提供されるHTMLから、主要なニュース記事のタイトルとURLを抽出し、JSONの配列形式`[{"title": "...", "url": "..."}]`で出力してください。';
-
-const resolveUrl = (baseUrl: string, href: string) => {
-  try {
-    return new URL(href, baseUrl).toString();
-  } catch {
-    return '';
-  }
-};
-
-const findFeedUrls = (pageUrl: string, html: string) => {
-  const feedUrls: string[] = [];
-  const linkTagRegex = /<link\s+[^>]*>/gi;
-  const hrefRegex = /href=["']([^"']+)["']/i;
-  const typeRegex = /type=["']([^"']+)["']/i;
-
-  let match = linkTagRegex.exec(html);
-  while (match) {
-    const tag = match[0];
-    const type = tag.match(typeRegex)?.[1]?.toLowerCase() || '';
-    const href = tag.match(hrefRegex)?.[1] || '';
-    if (href && (type.includes('rss') || type.includes('atom') || type.includes('xml'))) {
-      const resolved = resolveUrl(pageUrl, href);
-      if (resolved) feedUrls.push(resolved);
-    }
-    match = linkTagRegex.exec(html);
-  }
-
-  return Array.from(new Set(feedUrls));
-};
-
-const hasArticleLikeHtml = (html: string) =>
-  html.length >= 500 && (html.includes('<article') || html.includes('<a') || html.includes('href'));
 
 const getErrorText = (error: any): string => {
   const messages: string[] = [];
@@ -68,6 +36,7 @@ export async function POST(req: NextRequest) {
     let recommendedType: 'RSS' | 'HTML' | 'SPA' | null = null;
     let recommendedUrl = url;
     let message = '';
+    const diagnostics: FetchDiagnostic[] = [];
 
     // --- 1. 自動判定または指定タイプでのスクレイピング試行 ---
     try {
@@ -88,8 +57,22 @@ export async function POST(req: NextRequest) {
           // 入力URLがRSSでない場合はHTML判定へ進む
         }
 
-        rawContent = await fetchHtml(url);
+        const htmlResult = await fetchHtmlAdvanced(url);
+        rawContent = htmlResult.html;
+        diagnostics.push(...htmlResult.diagnostics);
+        if (htmlResult.blocked) {
+          diagnostics.push({
+            stage: 'recommendation',
+            level: 'warning',
+            message: 'ブロックページの疑いがあるため、RSS候補またはSPA方式での取得を優先して確認します。',
+          });
+        }
         const feedUrls = findFeedUrls(url, rawContent);
+        diagnostics.push({
+          stage: 'feed-discovery',
+          level: 'info',
+          message: `RSS/Atom候補を${feedUrls.length}件検出しました。`,
+        });
         for (const feedUrl of feedUrls) {
           try {
             const rssArticles = await fetchRss(feedUrl);
@@ -100,7 +83,8 @@ export async function POST(req: NextRequest) {
                 recommendedUrl: feedUrl,
                 message: 'ページ内にRSS/Atomフィードを見つけました。安定運用のためRSS方式で登録します。',
                 articles: rssArticles,
-                count: rssArticles.length
+                count: rssArticles.length,
+                diagnostics
               });
             }
           } catch {
@@ -108,7 +92,13 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        if (hasArticleLikeHtml(rawContent)) {
+        const candidateCount = extractArticleCandidates(url, rawContent, 80).length;
+        diagnostics.push({
+          stage: 'link-extraction',
+          level: candidateCount > 0 ? 'info' : 'warning',
+          message: `記事候補リンクを${candidateCount}件抽出しました。`,
+        });
+        if (!htmlResult.blocked && hasArticleLikeHtml(rawContent)) {
           recommendedType = 'HTML';
           message = 'RSSは見つかりませんでしたが、静的HTMLから記事リンクを抽出できそうです。HTML方式で登録します。';
         } else {
@@ -128,7 +118,9 @@ export async function POST(req: NextRequest) {
         articles = rssArticles;
         recommendedType = 'RSS';
       } else if (selectedType === 'HTML') {
-        rawContent = await fetchHtml(url);
+        const htmlResult = await fetchHtmlAdvanced(url);
+        rawContent = htmlResult.html;
+        diagnostics.push(...htmlResult.diagnostics);
         recommendedType = 'HTML';
         
         // 簡易チェック: SPA（クライアントサイドレンダリング）の疑いがあるか
@@ -140,6 +132,11 @@ export async function POST(req: NextRequest) {
         }
       } else if (selectedType === 'SPA') {
         rawContent = await fetchSpa(url);
+        diagnostics.push({
+          stage: 'fetch-spa',
+          level: 'info',
+          message: 'Jina Reader API経由でSPA/動的ページの本文取得を試行しました。',
+        });
         recommendedType = 'SPA';
       }
     } catch (scrapingError: any) {
@@ -171,12 +168,13 @@ export async function POST(req: NextRequest) {
           previewOnly: true,
           recommendedType,
           recommendedUrl,
-          message: message || 'スクレイピングに成功しました。Gemini APIキーを設定すると、記事タイトル・URLのAI抽出テストも実行できます。'
+          message: message || 'スクレイピングに成功しました。Gemini APIキーを設定すると、記事タイトル・URLのAI抽出テストも実行できます。',
+          diagnostics
         });
       }
 
       try {
-        articles = await scrapeArticlesWithGemini(geminiApiKey, rawContent, prompt);
+        articles = await scrapeArticlesWithGemini(geminiApiKey, rawContent, prompt, recommendedUrl);
         if (articles.length === 0) {
           return NextResponse.json({
             success: false,
@@ -198,7 +196,8 @@ export async function POST(req: NextRequest) {
       recommendedUrl,
       message,
       articles,
-      count: articles.length
+      count: articles.length,
+      diagnostics
     });
 
   } catch (globalError: any) {
