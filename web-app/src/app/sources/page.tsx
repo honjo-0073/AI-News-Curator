@@ -45,6 +45,7 @@ function SourcesContent() {
     message?: string;
     recommendedType?: 'RSS' | 'HTML' | 'SPA';
     recommendedUrl?: string;
+    diagnostics?: Array<{ stage: string; level: 'info' | 'warning' | 'error'; message: string }>;
   } | null>(null);
 
   useEffect(() => {
@@ -350,6 +351,19 @@ function SourcesContent() {
 
               {testResult.success && testResult.previewOnly && (
                 <p style={{ fontSize: '0.85em', color: 'var(--text-secondary)' }}>{testResult.message}</p>
+              )}
+
+              {testResult.diagnostics && testResult.diagnostics.length > 0 && (
+                <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <p style={{ fontSize: '0.8em', color: 'var(--text-muted)', marginBottom: '8px' }}>診断ログ</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {testResult.diagnostics.map((item, idx) => (
+                      <p key={`${item.stage}-${idx}`} style={{ fontSize: '0.78em', color: item.level === 'error' ? '#fca5a5' : item.level === 'warning' ? '#fbbf24' : 'var(--text-secondary)', lineHeight: 1.4 }}>
+                        [{item.stage}] {item.message}
+                      </p>
+                    ))}
+                  </div>
+                </div>
               )}
 
               {!testResult.success && (
