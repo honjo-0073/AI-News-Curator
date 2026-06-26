@@ -24,6 +24,112 @@ export type HtmlFetchResult = {
   diagnostics: FetchDiagnostic[];
 };
 
+
+const DEFAULT_GEMINI_MIN_REQUEST_INTERVAL_MS = 15000;
+const DEFAULT_GEMINI_MAX_RETRIES = 3;
+const GEMINI_RETRY_BUFFER_MS = 2000;
+
+let geminiQueue = Promise.resolve();
+let lastGeminiRequestAt = 0;
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const getPositiveIntegerEnv = (name: string, fallback: number) => {
+  const value = process.env[name];
+  if (!value) return fallback;
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
+const getGeminiMinRequestIntervalMs = () => getPositiveIntegerEnv(
+  'GEMINI_MIN_REQUEST_INTERVAL_MS',
+  DEFAULT_GEMINI_MIN_REQUEST_INTERVAL_MS
+);
+
+const getGeminiMaxRetries = () => getPositiveIntegerEnv(
+  'GEMINI_MAX_RETRIES',
+  DEFAULT_GEMINI_MAX_RETRIES
+);
+
+const getErrorMessage = (error: unknown) => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+};
+
+const isGeminiQuotaError = (error: unknown) => {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes('429')
+    || message.includes('too many requests')
+    || message.includes('quota exceeded')
+    || message.includes('quota_failure');
+};
+
+const extractGeminiRetryDelayMs = (error: unknown) => {
+  const message = getErrorMessage(error);
+  const retryDelayMatch = message.match(/retryDelay["']?\s*[:=]\s*["']?(\d+(?:\.\d+)?)s/i);
+  const retryInMatch = message.match(/retry\s+in\s+(\d+(?:\.\d+)?)s/i);
+  const seconds = Number.parseFloat(retryDelayMatch?.[1] || retryInMatch?.[1] || '');
+
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.ceil(seconds * 1000) + GEMINI_RETRY_BUFFER_MS;
+  }
+
+  return null;
+};
+
+async function waitForGeminiRateLimit() {
+  const minIntervalMs = getGeminiMinRequestIntervalMs();
+  const elapsedMs = Date.now() - lastGeminiRequestAt;
+  const waitMs = Math.max(0, minIntervalMs - elapsedMs);
+
+  if (waitMs > 0) {
+    console.info(`Gemini rate limit: waiting ${waitMs}ms before next request.`);
+    await sleep(waitMs);
+  }
+}
+
+async function enqueueGeminiRequest<T>(task: () => Promise<T>): Promise<T> {
+  const run = geminiQueue.then(async () => {
+    await waitForGeminiRateLimit();
+    try {
+      return await task();
+    } finally {
+      lastGeminiRequestAt = Date.now();
+    }
+  });
+
+  geminiQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function generateGeminiContentWithRateLimit<T>(task: () => Promise<T>): Promise<T> {
+  const maxRetries = getGeminiMaxRetries();
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      return await enqueueGeminiRequest(task);
+    } catch (error) {
+      if (!isGeminiQuotaError(error) || attempt === maxRetries) {
+        throw error;
+      }
+
+      const retryDelayMs = extractGeminiRetryDelayMs(error)
+        || Math.min(getGeminiMinRequestIntervalMs() * (2 ** attempt), 60000);
+      console.warn(`Gemini quota exceeded: retrying after ${retryDelayMs}ms.`);
+      await sleep(retryDelayMs);
+    }
+  }
+
+  throw new Error('Gemini APIのレート制限リトライに失敗しました。');
+}
+
 const HTML_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -356,7 +462,7 @@ export async function scrapeArticlesWithGemini(
     ? `以下の記事候補リンク一覧から、ニュース記事として重要な最新記事のタイトルとURLを最大5件抽出してください。\n\n${content}`
     : `以下のHTML/Markdownから最新記事のタイトルとURLを抽出してください。\n\n${content}`;
 
-  const result = await model.generateContent(prompt);
+  const result = await generateGeminiContentWithRateLimit(() => model.generateContent(prompt));
   const responseText = result.response.text();
   
   try {
@@ -391,7 +497,7 @@ export async function summarizeAndCheckSecurity(
   });
 
   const prompt = `以下の記事内容を要約し、検閲結果を返してください。\n\n${articleContent}`;
-  const result = await model.generateContent(prompt);
+  const result = await generateGeminiContentWithRateLimit(() => model.generateContent(prompt));
   const responseText = result.response.text();
 
   try {
