@@ -10,6 +10,11 @@ export const useAuth = () => useContext(AuthContext);
 
 type AuthMode = 'signin' | 'signup' | 'forgot-password' | 'update-password';
 
+// Keep this recovery-path message ASCII-only in source. The deployment failure
+// was caused by this string being committed with a damaged/missing quote after
+// its Japanese text was corrupted by a character-encoding conversion.
+const PASSWORD_RECOVERY_MESSAGE = '\u65b0\u3057\u3044\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u8a2d\u5b9a\u3057\u3066\u304f\u3060\u3055\u3044\u3002';
+
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,7 +36,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       setUser(session?.user ?? null);
       if (event === 'PASSWORD_RECOVERY') {
         setMode('update-password');
-        setMessage('新しいパスワードを設定してください。');
+        setMessage(PASSWORD_RECOVERY_MESSAGE);
       }
       setLoading(false);
     });
